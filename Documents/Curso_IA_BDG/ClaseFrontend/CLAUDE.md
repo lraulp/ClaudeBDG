@@ -1,6 +1,28 @@
-# CLAUDE.md — MiniJira Frontend
+# CLAUDE.md
+
+This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+
+---
+
+# MiniJira Frontend
 
 Reglas globales de desarrollo para este proyecto. Todo el código generado en esta sesión DEBE cumplirlas.
+
+---
+
+## Comandos
+
+```bash
+pnpm dev          # servidor de desarrollo (Vite)
+pnpm build        # tsc -b && vite build
+pnpm lint         # eslint
+pnpm preview      # preview del build
+
+pnpm test         # vitest (watch)
+pnpm test --run   # vitest una sola pasada (CI)
+```
+
+Los tests corren con jsdom; el alias `@` apunta a `src/`. Variable de entorno de desarrollo: `VITE_API_URL` (default: `http://localhost:3000/api`).
 
 ---
 
@@ -25,6 +47,41 @@ Reglas globales de desarrollo para este proyecto. Todo el código generado en es
 | Package manager | pnpm |
 
 Archivos `.tsx` para componentes React. Archivos `.ts` para utilidades, hooks, stores, tipos y API.
+
+---
+
+## Estado actual del proyecto (sin backend real)
+
+Toda la data del tablero viene de `src/features/board/mockTickets.ts`. Las funciones en `src/api/` están escritas pero no se invocan aún — `BoardPage` usa estado local con los mocks directamente.
+
+La autenticación mock vive en `src/lib/mockAuth.ts` (dos usuarios: `ana` admin, `carlos` usuario). `LoginForm` los expone como botones de acceso rápido que llaman directamente a `authStore.setAuth()`. Eliminar esos botones cuando el backend esté listo.
+
+`authStore` persiste en `localStorage` con clave `auth` (middleware `persist` de Zustand).
+
+---
+
+## Arquitectura de rutas y el TicketDrawer
+
+El drawer de tickets se controla **vía query param** `?ticket=<id>`. Para crear uno nuevo: `?ticket=new`. `BoardPage` lee `useSearchParams()`, abre el `Sheet` si el param existe, y al cerrar lo elimina con `navigate(..., { replace: true })`.
+
+Árbol de rutas:
+```
+/login, /register       → AuthLayout (sin navbar)
+/board                  → BoardPage  (ProtectedRoute → AppLayout)
+/dashboard              → DashboardPage (ProtectedRoute → AppLayout)
+/admin                  → AdminPage  (ProtectedRoute requiredRole="admin" → AppLayout)
+/                       → redirect a /board
+```
+
+`ProtectedRoute` sin `requiredRole` bloquea por token. Con `requiredRole="admin"` redirige a `/board` si el rol no coincide.
+
+---
+
+## Kanban y DnD
+
+`KanbanBoard` gestiona todo el DnD con `@dnd-kit`. Las columnas usan el `id` del `TicketStatus` como droppable id. La lógica de movimiento entre columnas ocurre en `onDragOver` (actualiza `status` del ticket); el reordenamiento dentro de la misma columna ocurre en `onDragEnd` con `arrayMove`.
+
+> **Discrepancia conocida:** `src/types/index.ts` define `en_revision` como `TicketStatus` y `KanbanBoard` expone 4 columnas (`backlog | en_progreso | en_revision | hecho`). Las reglas de negocio dicen 3 estados. El comentario en `KanbanBoard.tsx` línea 19 indica que la eliminación de `en_revision` fue diferida explícitamente. No agregar nuevos estados; la decisión de eliminar `en_revision` está pendiente.
 
 ---
 
@@ -218,7 +275,7 @@ const mutation = useMutation({
 })
 ```
 
-El cliente axios vive en `@/lib/axios`. El token JWT se inyecta automáticamente via interceptor — no pasarlo manualmente.
+El cliente axios vive en `@/lib/axios`. El token JWT se inyecta automáticamente via interceptor — no pasarlo manualmente. Un `401` del servidor llama automáticamente a `authStore.logout()`.
 
 ### Formularios
 
@@ -255,7 +312,7 @@ Schemas Zod en archivos `*Schemas.ts` dentro del feature correspondiente. No dup
 
 ### Tickets
 
-- **Estados válidos:** `backlog` | `en_progreso` | `hecho` — exactamente 3, no agregar más.
+- **Estados válidos:** `backlog` | `en_progreso` | `hecho` — exactamente 3, no agregar más. (`en_revision` existe en el código pero está pendiente de eliminar; ver nota en sección Kanban.)
 - **Prioridades válidas:** `baja` | `media` | `alta` | `critica` — usar los valores del enum en `@/types/index.ts`.
 - Archivado es **lógico** (`archived: true`), nunca físico. Los tickets archivados no aparecen en el tablero.
 - Título obligatorio, máximo 255 caracteres. Sanitizar HTML/scripts antes de persistir.
