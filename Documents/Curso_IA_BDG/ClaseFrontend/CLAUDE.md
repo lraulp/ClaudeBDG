@@ -18,8 +18,9 @@ pnpm build        # tsc -b && vite build
 pnpm lint         # eslint
 pnpm preview      # preview del build
 
-pnpm test         # vitest (watch)
-pnpm test --run   # vitest una sola pasada (CI)
+pnpm test                        # vitest (watch)
+pnpm test --run                  # vitest una sola pasada (CI)
+pnpm test --run src/path/to/file # ejecutar un archivo de test específico
 ```
 
 Los tests corren con jsdom; el alias `@` apunta a `src/`. Variable de entorno de desarrollo: `VITE_API_URL` (default: `http://localhost:3000/api`).
@@ -79,7 +80,29 @@ El drawer de tickets se controla **vía query param** `?ticket=<id>`. Para crear
 
 ## Kanban y DnD
 
-`KanbanBoard` gestiona todo el DnD con `@dnd-kit`. Las columnas usan el `id` del `TicketStatus` como droppable id. La lógica de movimiento entre columnas ocurre en `onDragOver` (actualiza `status` del ticket); el reordenamiento dentro de la misma columna ocurre en `onDragEnd` con `arrayMove`.
+### Jerarquía de componentes
+
+```
+BoardPage
+  useBoardFilters(tickets) → { filters, setFilters, filtered }
+  KanbanBoard (recibe `filtered`, no `tickets`)
+    KanbanColumn (droppable por status id)
+      TicketCard  ← wrapper DnD: useSortable + navegación a ?ticket=<id>
+        TaskCard  ← UI pura: cva variants, sin lógica DnD ni routing
+  DragOverlay
+    TaskCard (usado directamente, sin TicketCard)
+```
+
+**`TaskCard` vs `TicketCard`:** `TaskCard` (`src/components/TaskCard.tsx`) es el componente visual puro — acepta `ticket`, `dragging?`, `onClick?`. `TicketCard` (`src/features/board/TicketCard.tsx`) lo envuelve con `useSortable` y `useNavigate`. El `DragOverlay` en `KanbanBoard` renderiza `TaskCard` directamente para el fantasma de arrastre.
+
+### Estado filtrado vs. estado completo
+
+`BoardPage` mantiene `tickets` (array completo) y pasa a `KanbanBoard` solo el subconjunto `filtered` (resultado de `useBoardFilters`). El handler `handleTicketsChange` recibe las tarjetas visibles actualizadas y las fusiona de vuelta al estado completo mediante un `Map` keyed por `id` — las tarjetas fuera del filtro activo se preservan intactas.
+
+### DnD — flujo de eventos
+
+- `onDragOver`: detecta cambio de columna resolviendo el `status` del `overId` (puede ser un column id o un card id). Actualiza `status` del ticket activo y reordena con `arrayMove` si se suelta sobre otra tarjeta.
+- `onDragEnd`: maneja **solo** reordenamiento dentro de la misma columna. El cambio de columna ya ocurrió en `onDragOver`.
 
 > **Discrepancia conocida:** `src/types/index.ts` define `en_revision` como `TicketStatus` y `KanbanBoard` expone 4 columnas (`backlog | en_progreso | en_revision | hecho`). Las reglas de negocio dicen 3 estados. El comentario en `KanbanBoard.tsx` línea 19 indica que la eliminación de `en_revision` fue diferida explícitamente. No agregar nuevos estados; la decisión de eliminar `en_revision` está pendiente.
 
@@ -89,91 +112,7 @@ El drawer de tickets se controla **vía query param** `?ticket=<id>`. Para crear
 
 **NUNCA uses colores inventados. NUNCA uses clases Tailwind con hex arbitrarios como `bg-[#abc]` salvo las excepciones de sombra documentadas abajo.**
 
-Los tokens de color del sistema están definidos en `DESIGN.md` y deben estar registrados en `src/index.css` bajo `@theme`. Usa ÚNICAMENTE las clases Tailwind derivadas de esos tokens.
-
-### Configuración requerida en `src/index.css`
-
-```css
-@import "tailwindcss";
-
-@theme {
-  /* Surfaces */
-  --color-surface:                    #f9f9fb;
-  --color-surface-dim:                #d9dadc;
-  --color-surface-bright:             #f9f9fb;
-  --color-surface-container-lowest:   #ffffff;
-  --color-surface-container-low:      #f3f3f5;
-  --color-surface-container:          #eeeef0;
-  --color-surface-container-high:     #e8e8ea;
-  --color-surface-container-highest:  #e2e2e4;
-  --color-surface-variant:            #e2e2e4;
-  --color-surface-tint:               #005bc1;
-
-  /* On-surface (texto sobre superficies) */
-  --color-on-surface:                 #1a1c1d;
-  --color-on-surface-variant:         #414755;
-  --color-inverse-surface:            #2f3132;
-  --color-inverse-on-surface:         #f0f0f2;
-
-  /* Outline (bordes) */
-  --color-outline:                    #717786;
-  --color-outline-variant:            #c1c6d7;
-
-  /* Primary */
-  --color-primary:                    #0058bc;
-  --color-on-primary:                 #ffffff;
-  --color-primary-container:          #0070eb;
-  --color-on-primary-container:       #fefcff;
-  --color-inverse-primary:            #adc6ff;
-
-  /* Secondary */
-  --color-secondary:                  #5e5e63;
-  --color-on-secondary:               #ffffff;
-  --color-secondary-container:        #e0dfe4;
-  --color-on-secondary-container:     #626267;
-
-  /* Tertiary */
-  --color-tertiary:                   #9e3d00;
-  --color-on-tertiary:                #ffffff;
-  --color-tertiary-container:         #c64f00;
-  --color-on-tertiary-container:      #fffbff;
-
-  /* Error */
-  --color-error:                      #ba1a1a;
-  --color-on-error:                   #ffffff;
-  --color-error-container:            #ffdad6;
-  --color-on-error-container:         #93000a;
-
-  /* Background */
-  --color-background:                 #f9f9fb;
-  --color-on-background:              #1a1c1d;
-
-  /* Fixed variants */
-  --color-primary-fixed:              #d8e2ff;
-  --color-primary-fixed-dim:          #adc6ff;
-  --color-on-primary-fixed:           #001a41;
-  --color-on-primary-fixed-variant:   #004493;
-  --color-secondary-fixed:            #e3e2e7;
-  --color-secondary-fixed-dim:        #c7c6cb;
-  --color-on-secondary-fixed:         #1a1b1f;
-  --color-on-secondary-fixed-variant: #46464b;
-  --color-tertiary-fixed:             #ffdbcc;
-  --color-tertiary-fixed-dim:         #ffb595;
-  --color-on-tertiary-fixed:          #351000;
-  --color-on-tertiary-fixed-variant:  #7c2e00;
-
-  /* Tipografía */
-  --font-sans: 'Inter', system-ui, sans-serif;
-
-  /* Border radius */
-  --radius-sm:      0.25rem;
-  --radius-DEFAULT: 0.5rem;
-  --radius-md:      0.75rem;
-  --radius-lg:      1rem;
-  --radius-xl:      1.5rem;
-  --radius-full:    9999px;
-}
-```
+Los tokens de color del sistema están registrados en `src/index.css` bajo `@theme`. Usa ÚNICAMENTE las clases Tailwind derivadas de esos tokens.
 
 ### Tabla de uso de colores
 

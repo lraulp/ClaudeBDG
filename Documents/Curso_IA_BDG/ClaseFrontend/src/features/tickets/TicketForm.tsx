@@ -168,7 +168,7 @@ export default function TicketForm({
           <FieldLabel>Asignado a</FieldLabel>
           <Select
             value={watch('assigneeId') ?? '__none__'}
-            onValueChange={(v) => setValue('assigneeId', v === '__none__' ? undefined : v)}
+            onValueChange={(v) => setValue('assigneeId', v === '__none__' ? undefined : v ?? undefined)}
           >
             <SelectTrigger className={selectTriggerClass}>
               <SelectValue placeholder="Sin asignar" />

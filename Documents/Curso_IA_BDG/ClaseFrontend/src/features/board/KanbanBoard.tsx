@@ -1,4 +1,5 @@
-import { useState } from 'react'
+import { useState, useOptimistic, useTransition } from 'react'
+import { useNavigate, useSearchParams } from 'react-router-dom'
 import {
   DndContext,
   DragOverlay,
@@ -7,66 +8,55 @@ import {
   useSensor,
   useSensors,
   type DragEndEvent,
-  type DragOverEvent,
   type DragStartEvent,
 } from '@dnd-kit/core'
-import { arrayMove } from '@dnd-kit/sortable'
 import type { Ticket, TicketStatus } from '@/types'
+import { useBoardStore, simulateMoveApi } from '@/stores/boardStore'
+import { toast } from 'sonner'
+import TaskCard from '@/components/TaskCard'
 import KanbanColumn from './KanbanColumn'
-import TicketCard from './TicketCard'
 
 // User said to defer removing en_revision — keeping 4 columns until that task is scheduled
-const COLUMNS: TicketStatus[] = ['backlog', 'en_progreso', 'en_revision', 'hecho']
+const COLUMN_CONFIG: { status: TicketStatus; label: string }[] = [
+  { status: 'backlog',     label: 'Por hacer'   },
+  { status: 'en_progreso', label: 'En progreso' },
+  { status: 'en_revision', label: 'En revisión' },
+  { status: 'hecho',       label: 'Listo'       },
+]
+
+const STATUSES = COLUMN_CONFIG.map((c) => c.status)
 
 interface Props {
   tickets: Ticket[]
-  onTicketsChange: (tickets: Ticket[]) => void
 }
 
-export default function KanbanBoard({ tickets, onTicketsChange }: Props) {
+export default function KanbanBoard({ tickets }: Props) {
   const [activeId, setActiveId] = useState<string | null>(null)
+  const navigate = useNavigate()
+  const [searchParams] = useSearchParams()
+  const { moveTicket, reorderInColumn } = useBoardStore()
+  const [isPending, startTransition] = useTransition()
+
+  const [optimisticTickets, addOptimistic] = useOptimistic(
+    tickets,
+    (state, action: { id: string; status: TicketStatus }) =>
+      state.map((t) => (t.id === action.id ? { ...t, status: action.status } : t))
+  )
 
   const sensors = useSensors(
     useSensor(PointerSensor, { activationConstraint: { distance: 8 } })
   )
 
-  const activeTicket = activeId ? tickets.find((t) => t.id === activeId) : null
+  const activeTicket = activeId ? optimisticTickets.find((t) => t.id === activeId) : null
+
+  function openNewTicket() {
+    const params = new URLSearchParams(searchParams)
+    params.set('ticket', 'new')
+    navigate(`/board?${params.toString()}`)
+  }
 
   function handleDragStart({ active }: DragStartEvent) {
     setActiveId(active.id as string)
-  }
-
-  function handleDragOver({ active, over }: DragOverEvent) {
-    if (!over) return
-
-    const activeId = active.id as string
-    const overId = over.id as string
-    if (activeId === overId) return
-
-    const activeTicket = tickets.find((t) => t.id === activeId)
-    if (!activeTicket) return
-
-    // Resolve target column: either dragging over a column or over another card
-    const targetStatus: TicketStatus | undefined = COLUMNS.includes(overId as TicketStatus)
-      ? (overId as TicketStatus)
-      : tickets.find((t) => t.id === overId)?.status
-
-    if (!targetStatus || targetStatus === activeTicket.status) return
-
-    // Move to new column, placing the card at the position of the over card
-    const overIndex = tickets.findIndex((t) => t.id === overId)
-    const activeIndex = tickets.findIndex((t) => t.id === activeId)
-
-    const updated = tickets.map((t) =>
-      t.id === activeId ? { ...t, status: targetStatus, version: t.version + 1 } : t
-    )
-
-    // If over a card (not a column drop zone), place after it
-    if (!COLUMNS.includes(overId as TicketStatus) && overIndex !== -1) {
-      onTicketsChange(arrayMove(updated, activeIndex, overIndex))
-    } else {
-      onTicketsChange(updated)
-    }
   }
 
   function handleDragEnd({ active, over }: DragEndEvent) {
@@ -80,14 +70,28 @@ export default function KanbanBoard({ tickets, onTicketsChange }: Props) {
     const activeTicket = tickets.find((t) => t.id === activeId)
     if (!activeTicket) return
 
-    // Reorder within the same column
-    if (!COLUMNS.includes(overId as TicketStatus)) {
+    const targetStatus: TicketStatus | undefined = STATUSES.includes(overId as TicketStatus)
+      ? (overId as TicketStatus)
+      : tickets.find((t) => t.id === overId)?.status
+
+    if (!targetStatus) return
+
+    if (targetStatus !== activeTicket.status) {
+      // Cross-column move: optimistic update + simulated async backend
+      startTransition(async () => {
+        addOptimistic({ id: activeId, status: targetStatus })
+        try {
+          await simulateMoveApi(activeId, targetStatus)
+          moveTicket(activeId, targetStatus)
+        } catch {
+          toast.error('No se pudo mover el ticket')
+          // useOptimistic reverts automatically — store was not updated
+        }
+      })
+    } else {
+      // Same-column reorder: synchronous, no backend call needed
       const overTicket = tickets.find((t) => t.id === overId)
-      if (overTicket && overTicket.status === activeTicket.status) {
-        const oldIndex = tickets.findIndex((t) => t.id === activeId)
-        const newIndex = tickets.findIndex((t) => t.id === overId)
-        onTicketsChange(arrayMove(tickets, oldIndex, newIndex))
-      }
+      if (overTicket) reorderInColumn(activeId, overId)
     }
   }
 
@@ -96,15 +100,20 @@ export default function KanbanBoard({ tickets, onTicketsChange }: Props) {
       sensors={sensors}
       collisionDetection={closestCorners}
       onDragStart={handleDragStart}
-      onDragOver={handleDragOver}
       onDragEnd={handleDragEnd}
     >
-      <div className="flex gap-4 h-full overflow-x-auto pb-2">
-        {COLUMNS.map((status) => (
+      <div
+        className={`flex gap-4 h-full overflow-x-auto pb-2 transition-opacity ${
+          isPending ? 'opacity-75' : 'opacity-100'
+        }`}
+      >
+        {COLUMN_CONFIG.map(({ status, label }) => (
           <KanbanColumn
             key={status}
-            status={status}
-            tickets={tickets.filter((t) => t.status === status)}
+            id={status}
+            label={label}
+            tickets={optimisticTickets.filter((t) => t.status === status)}
+            onAddTicket={openNewTicket}
           />
         ))}
       </div>
@@ -112,7 +121,7 @@ export default function KanbanBoard({ tickets, onTicketsChange }: Props) {
       <DragOverlay dropAnimation={{ duration: 180, easing: 'ease' }}>
         {activeTicket && (
           <div className="rotate-1 scale-105 shadow-[0px_8px_24px_rgba(0,0,0,0.12)] rounded-md opacity-95">
-            <TicketCard ticket={activeTicket} />
+            <TaskCard ticket={activeTicket} />
           </div>
         )}
       </DragOverlay>

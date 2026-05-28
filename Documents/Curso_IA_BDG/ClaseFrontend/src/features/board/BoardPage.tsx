@@ -1,9 +1,9 @@
-import { useState, useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useSearchParams } from 'react-router-dom'
-import { mockTickets, mockUsers } from './mockTickets'
-import type { Tag, Ticket } from '@/types'
-import type { TicketFormValues } from '@/features/tickets/ticketSchemas'
+import { mockUsers } from './mockTickets'
+import type { Tag } from '@/types'
 import { useBoardFilters } from './useBoardFilters'
+import { useBoardStore } from '@/stores/boardStore'
 import KanbanBoard from './KanbanBoard'
 import BoardToolbar from './BoardToolbar'
 import FilterPanel from './FilterPanel'
@@ -11,7 +11,8 @@ import TicketDrawer from '@/features/tickets/TicketDrawer'
 
 export default function BoardPage() {
   const [searchParams] = useSearchParams()
-  const [tickets, setTickets] = useState<Ticket[]>(mockTickets)
+  const tickets = useBoardStore((s) => s.tickets)
+  const { updateTicket, archiveTicket, createTicket } = useBoardStore()
   const [filterOpen, setFilterOpen] = useState(false)
   const { filters, setFilters, filtered } = useBoardFilters(tickets)
 
@@ -22,56 +23,6 @@ export default function BoardPage() {
     tickets.forEach((t) => t.tags.forEach((tag) => map.set(tag.id, tag)))
     return Array.from(map.values())
   }, [tickets])
-
-  function handleTicketsChange(updatedVisible: Ticket[]) {
-    const updatedMap = new Map(updatedVisible.map((t) => [t.id, t]))
-    setTickets((prev) => prev.map((t) => updatedMap.get(t.id) ?? t))
-  }
-
-  function handleUpdate(id: string, values: TicketFormValues) {
-    setTickets((prev) =>
-      prev.map((t) =>
-        t.id === id
-          ? {
-              ...t,
-              title: values.title,
-              description: values.description ?? '',
-              status: values.status,
-              priority: values.priority,
-              dueDate: values.dueDate ?? null,
-              assignee: values.assigneeId
-                ? mockUsers.find((u) => u.id === values.assigneeId)
-                : undefined,
-              tags: allTags.filter((tag) => values.tagIds?.includes(tag.id)),
-              version: t.version + 1,
-            }
-          : t
-      )
-    )
-  }
-
-  function handleArchive(id: string) {
-    setTickets((prev) => prev.map((t) => (t.id === id ? { ...t, archived: true } : t)))
-  }
-
-  function handleCreate(values: TicketFormValues) {
-    const newTicket: Ticket = {
-      id: `t${Date.now()}`,
-      title: values.title,
-      description: values.description ?? '',
-      status: values.status,
-      priority: values.priority,
-      reporter: mockUsers[0],
-      assignee: values.assigneeId ? mockUsers.find((u) => u.id === values.assigneeId) : undefined,
-      tags: allTags.filter((tag) => values.tagIds?.includes(tag.id)),
-      dueDate: values.dueDate ?? null,
-      archived: false,
-      version: 1,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString(),
-    }
-    setTickets((prev) => [newTicket, ...prev])
-  }
 
   return (
     <div className="flex flex-col flex-1 overflow-hidden">
@@ -93,7 +44,7 @@ export default function BoardPage() {
         )}
 
         <div className="flex-1 overflow-auto p-6">
-          <KanbanBoard tickets={filtered} onTicketsChange={handleTicketsChange} />
+          <KanbanBoard tickets={filtered} />
         </div>
       </div>
 
@@ -104,9 +55,9 @@ export default function BoardPage() {
           open={!!ticketId}
           users={mockUsers}
           tags={allTags}
-          onUpdate={handleUpdate}
-          onArchive={handleArchive}
-          onCreate={handleCreate}
+          onUpdate={(id, values) => updateTicket(id, values, mockUsers, allTags)}
+          onArchive={archiveTicket}
+          onCreate={(values) => createTicket(values, mockUsers, allTags)}
         />
       )}
     </div>

@@ -1,7 +1,6 @@
 import { cva } from 'class-variance-authority'
 import { isPast, isToday } from 'date-fns'
 import type { Ticket } from '@/types'
-import { cn } from '@/lib/utils'
 import PriorityBadge from './PriorityBadge'
 import TagBadge from './TagBadge'
 import UserAvatar from './UserAvatar'
@@ -20,15 +19,24 @@ const cardVariants = cva(
       priority: {
         baja:    'cursor-pointer',
         media:   'cursor-pointer',
-        alta:    'cursor-pointer border-l-2 border-l-tertiary',
-        critica: 'cursor-pointer border-l-2 border-l-error',
+        alta:    'cursor-pointer',
+        critica: 'cursor-pointer',
+      },
+      overdue: {
+        true:  '',
+        false: '',
       },
       dragging: {
         true:  'opacity-40 cursor-grabbing',
         false: '',
       },
     },
-    defaultVariants: { priority: 'baja', dragging: false },
+    compoundVariants: [
+      { priority: 'alta',    overdue: false, class: 'border-l-2 border-l-tertiary' },
+      { priority: 'critica', overdue: false, class: 'border-l-2 border-l-error'   },
+      { overdue: true,                       class: 'border-l-2 border-l-error'   },
+    ],
+    defaultVariants: { priority: 'baja', overdue: false, dragging: false },
   }
 )
 
@@ -51,10 +59,7 @@ export default function TaskCard({ ticket, dragging = false, onClick }: Props) {
       tabIndex={0}
       onClick={onClick}
       onKeyDown={(e) => e.key === 'Enter' && onClick?.()}
-      className={cn(
-        cardVariants({ priority: ticket.priority, dragging }),
-        isOverdue && 'border-l-2 border-l-error'
-      )}
+      className={cardVariants({ priority: ticket.priority, overdue: isOverdue, dragging })}
     >
       {ticket.editingBy && (
         <div className="mb-2">
